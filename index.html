@@ -40,7 +40,7 @@
     }
     #contenedorIframe {
       position: fixed;
-      /* En pantalla completa se deja libre la muesca y la barra de gestos
+      /* En modo app se deja libre la muesca y la barra de gestos
          (en navegador normal o computador estos valores son 0). */
       top: env(safe-area-inset-top, 0px);
       right: env(safe-area-inset-right, 0px);
@@ -53,10 +53,14 @@
       height: 100%;
       border: none;
       display: block;
-      background: #fff;
+      /* Mismo gris del monitor, para que no se vea un destello blanco al cargar */
+      background: #efefec;
+    }
+    @media (prefers-color-scheme: dark) {
+      iframe { background: #11171d; }
     }
 
-    /* Pantalla de carga mientras responde el servidor */
+    /* Pantalla de carga / aviso mientras el monitor no responde */
     #cargando {
       position: fixed;
       inset: 0;
@@ -82,9 +86,24 @@
       display: block;
       font-weight: 400;
       font-size: 14px;
-      opacity: .75;
+      opacity: .8;
+      max-width: 34em;
+      margin: 6px auto 0;
     }
+    #cargando.error .pulso { animation: none; stroke-dashoffset: 0; stroke: #9a9a9a; }
     #cargando.listo { opacity: 0; pointer-events: none; }
+    #reintentar {
+      font: 600 15px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #fff;
+      background: var(--naranjo);
+      border: 2px solid #fff;
+      border-radius: 999px;
+      padding: 10px 22px;
+      min-height: 44px;
+      cursor: pointer;
+    }
+    #reintentar:focus-visible { outline: 3px solid var(--rosado); outline-offset: 2px; }
+    #reintentar[hidden] { display: none; }
     @keyframes trazar {
       60%  { stroke-dashoffset: 0; }
       100% { stroke-dashoffset: -80; }
@@ -92,33 +111,11 @@
     @media (prefers-reduced-motion: reduce) {
       #cargando .pulso { animation: none; stroke-dashoffset: 0; }
     }
-
-    /* Botón de pantalla completa: abajo a la izquierda */
-    #btnPantallaCompleta {
-      position: fixed;
-      left: calc(14px + env(safe-area-inset-left, 0px));
-      bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-      z-index: 10;
-      width: 44px;
-      height: 44px;
-      display: grid;
-      place-items: center;
-      padding: 0;
-      background: var(--naranjo);
-      color: #fff;
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: 0 2px 10px rgba(0,0,0,.35);
-      cursor: pointer;
-    }
-    #btnPantallaCompleta svg { width: 22px; height: 22px; }
-    #btnPantallaCompleta:focus-visible { outline: 3px solid var(--rosado); outline-offset: 2px; }
-    #btnPantallaCompleta[hidden] { display: none; }
   </style>
 </head>
 <body>
 
-  <div id="cargando" role="status">
+  <div id="cargando" role="status" aria-live="polite">
     <svg viewBox="0 0 64 64" aria-hidden="true">
       <rect width="64" height="64" rx="14" fill="#FF671F"/>
       <rect x="10" y="14" width="44" height="30" rx="4" fill="#fff"/>
@@ -128,21 +125,15 @@
       <rect x="26" y="46" width="12" height="4" fill="#fff"/>
       <rect x="20" y="50" width="24" height="4" rx="2" fill="#fff"/>
     </svg>
-    <span>Conectando con el monitor SAP…
-      <small>Si tarda más de unos segundos, revisa que el servicio esté encendido.</small>
+    <span><span id="mensaje">Conectando con el monitor SAP…</span>
+      <small id="detalle">Si tarda más de unos segundos, revisa que la interfaz esté encendida.</small>
     </span>
+    <button id="reintentar" type="button" hidden>Reintentar ahora</button>
   </div>
 
   <div id="contenedorIframe">
-    <iframe id="miIframe" title="Monitor SAP Dunkin" allowfullscreen allow="fullscreen; clipboard-write"></iframe>
+    <iframe id="miIframe" title="Monitor SAP Dunkin" allow="clipboard-write"></iframe>
   </div>
-
-  <button id="btnPantallaCompleta" type="button" aria-label="Pantalla completa" hidden>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
-    </svg>
-  </button>
 
   <noscript>
     <p style="color:#fff;font:16px system-ui;text-align:center;padding:40px">Activa JavaScript para ver el monitor.</p>
@@ -150,48 +141,70 @@
 
   <script>
     /* ===== URL del monitor =====
-       Usa la URL del túnel (https), NO la IP directa:
-       - con la IP, cualquiera la ve en el código fuente;
-       - si esta página se publica con https, el navegador bloquea un iframe http. */
+       Es el monitor web de la interfaz (puerto monitorPuerto de la empresa). Para que se vea desde
+       fuera del servidor, la interfaz debe tener monitorSoloLocal=false y el puerto abierto en el
+       firewall de Windows y en Google Cloud.
+       Si esta página se publica con https, el monitor también debe ir por https (por ejemplo detrás
+       de un proxy con certificado): el navegador bloquea un iframe http dentro de una página https. */
     const URL_MONITOR = 'http://34.176.9.216:8090/';
+    const REINTENTO_SEG = 10;
 
     const iframe = document.getElementById('miIframe');
-    iframe.src = URL_MONITOR;
-
-    // Oculta la pantalla de carga cuando el monitor terminó de cargar (o a los 15 s, por si acaso)
     const cargando = document.getElementById('cargando');
-    const quitarCarga = () => cargando.classList.add('listo');
-    iframe.addEventListener('load', quitarCarga);
-    setTimeout(quitarCarga, 15000);
+    const mensaje = document.getElementById('mensaje');
+    const detalle = document.getElementById('detalle');
+    const reintentar = document.getElementById('reintentar');
+    let temporizador = null;
 
-    // ===== Pantalla completa =====
-    const btn = document.getElementById('btnPantallaCompleta');
-    const raiz = document.documentElement;
-    const pedir = raiz.requestFullscreen || raiz.webkitRequestFullscreen;
-    const salir = document.exitFullscreen || document.webkitExitFullscreen;
-    const enPantallaCompleta = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
-
-    // Abierta desde el acceso directo (ya está en modo app)
-    const comoApp = window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches
-                 || window.navigator.standalone === true;
-
-    // El botón aparece solo donde sirve: el navegador permite pantalla completa
-    // (el iPhone no lo permite para páginas) y no se abrió como app.
-    function actualizarBoton() {
-      btn.hidden = !pedir || comoApp || enPantallaCompleta();
+    function mostrarError(titulo, texto) {
+      cargando.classList.remove('listo');
+      cargando.classList.add('error');
+      mensaje.textContent = titulo;
+      detalle.textContent = texto;
+      reintentar.hidden = false;
     }
 
-    function alternarPantallaCompleta() {
-      if (enPantallaCompleta()) { if (salir) salir.call(document); return; }
-      if (!pedir) return;
-      const r = pedir.call(raiz, { navigationUI: 'hide' });
-      if (r && r.catch) r.catch(err => console.error('No se pudo activar pantalla completa: ' + err.message));
+    // Página https con monitor http: el navegador lo bloquearía y quedaría en blanco. Se avisa claro.
+    const bloqueadoPorHttps = location.protocol === 'https:' && URL_MONITOR.startsWith('http:');
+
+    // Comprueba que el monitor responda (/salud) antes de mostrarlo. Se usa "no-cors": no se lee la
+    // respuesta, solo se sabe si el servidor contestó; así no hay que cambiar nada en el monitor.
+    async function comprobar() {
+      clearTimeout(temporizador);
+      if (bloqueadoPorHttps) {
+        mostrarError('El monitor no se puede mostrar en esta página',
+          'Esta página se abre con https y el monitor va por http, y el navegador lo bloquea. ' +
+          'Abre esta página con http, o publica el monitor con https.');
+        return;
+      }
+      cargando.classList.remove('error');
+      mensaje.textContent = 'Conectando con el monitor SAP…';
+      detalle.textContent = 'Si tarda más de unos segundos, revisa que la interfaz esté encendida.';
+      reintentar.hidden = true;
+
+      const control = new AbortController();
+      const limite = setTimeout(() => control.abort(), 8000);
+      try {
+        await fetch(new URL('salud', URL_MONITOR), { mode: 'no-cors', cache: 'no-store', signal: control.signal });
+        clearTimeout(limite);
+        // Responde: se carga el monitor (solo la primera vez; después él mismo se actualiza solo).
+        if (!iframe.src) iframe.src = URL_MONITOR;
+        else cargando.classList.add('listo');
+      } catch (e) {
+        clearTimeout(limite);
+        mostrarError('No hay conexión con el monitor SAP',
+          'La interfaz puede estar detenida, o este equipo no llega al servidor. ' +
+          'Se vuelve a intentar cada ' + REINTENTO_SEG + ' segundos.');
+        temporizador = setTimeout(comprobar, REINTENTO_SEG * 1000);
+      }
     }
 
-    btn.addEventListener('click', alternarPantallaCompleta);
-    document.addEventListener('fullscreenchange', actualizarBoton);
-    document.addEventListener('webkitfullscreenchange', actualizarBoton);
-    actualizarBoton();
+    // Cuando el monitor terminó de cargar, se quita la pantalla de carga.
+    // Si después la interfaz se detiene, el propio monitor muestra "Sin conexión" y se reconecta solo.
+    iframe.addEventListener('load', () => cargando.classList.add('listo'));
+    reintentar.addEventListener('click', comprobar);
+
+    comprobar();
   </script>
 
 </body>
