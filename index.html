@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <!-- Sin esto, el celular muestra todo a "ancho de escritorio" y lo achica con zoom. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Monitor SAP Dunkin</title>
+  <meta name="description" content="Monitor de la integración con SAP Business One para los locales Dunkin.">
+  <!-- Es una herramienta interna: que los buscadores no la indexen. -->
+  <meta name="robots" content="noindex, nofollow">
+
+  <!-- ===== Ícono y modo app =====
+       - Pestaña del navegador: el SVG de abajo (va incluido en este archivo, no hay que subir nada).
+       - iPhone/iPad: apple-touch-icon.png (180x180, sin transparencia) en la MISMA carpeta.
+       - Android: manifest.webmanifest + icon-192.png / icon-512.png en la MISMA carpeta.
+       Si no subes esos archivos, la página funciona igual; solo cambia el ícono del acceso directo. -->
+  <meta name="apple-mobile-web-app-title" content="Monitor SAP">
+  <meta name="application-name" content="Monitor SAP">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#3B2416">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FF671F'/%3E%3Crect x='10' y='14' width='44' height='30' rx='4' fill='%23fff'/%3E%3Cpolyline points='14,32 22,32 26,22 32,40 36,28 40,32 50,32' fill='none' stroke='%23DA1884' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Crect x='26' y='46' width='12' height='4' fill='%23fff'/%3E%3Crect x='20' y='50' width='24' height='4' rx='2' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+
+  <style>
+    :root {
+      --fondo: #3B2416;     /* café oscuro */
+      --naranjo: #FF671F;
+      --rosado: #DA1884;
+      --texto: #FFF6EE;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: var(--fondo);
+    }
+    #contenedorIframe {
+      position: fixed;
+      /* En pantalla completa se deja libre la muesca y la barra de gestos
+         (en navegador normal o computador estos valores son 0). */
+      top: env(safe-area-inset-top, 0px);
+      right: env(safe-area-inset-right, 0px);
+      bottom: env(safe-area-inset-bottom, 0px);
+      left: env(safe-area-inset-left, 0px);
+      background: var(--fondo);
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+      background: #fff;
+    }
+
+    /* Pantalla de carga mientras responde el servidor */
+    #cargando {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      gap: 20px;
+      padding: 24px;
+      background: var(--fondo);
+      color: var(--texto);
+      font: 600 17px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      text-align: center;
+      z-index: 5;
+      transition: opacity .35s;
+    }
+    #cargando svg { width: 112px; height: 112px; }
+    #cargando .pulso {
+      stroke-dasharray: 80;
+      stroke-dashoffset: 80;
+      animation: trazar 1.6s ease-in-out infinite;
+    }
+    #cargando small {
+      display: block;
+      font-weight: 400;
+      font-size: 14px;
+      opacity: .75;
+    }
+    #cargando.listo { opacity: 0; pointer-events: none; }
+    @keyframes trazar {
+      60%  { stroke-dashoffset: 0; }
+      100% { stroke-dashoffset: -80; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #cargando .pulso { animation: none; stroke-dashoffset: 0; }
+    }
+
+    /* Botón de pantalla completa: abajo a la izquierda */
+    #btnPantallaCompleta {
+      position: fixed;
+      left: calc(14px + env(safe-area-inset-left, 0px));
+      bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+      z-index: 10;
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      background: var(--naranjo);
+      color: #fff;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35);
+      cursor: pointer;
+    }
+    #btnPantallaCompleta svg { width: 22px; height: 22px; }
+    #btnPantallaCompleta:focus-visible { outline: 3px solid var(--rosado); outline-offset: 2px; }
+    #btnPantallaCompleta[hidden] { display: none; }
+  </style>
+</head>
+<body>
+
+  <div id="cargando" role="status">
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#FF671F"/>
+      <rect x="10" y="14" width="44" height="30" rx="4" fill="#fff"/>
+      <polyline class="pulso" points="14,32 22,32 26,22 32,40 36,28 40,32 50,32"
+                fill="none" stroke="#DA1884" stroke-width="4"
+                stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="26" y="46" width="12" height="4" fill="#fff"/>
+      <rect x="20" y="50" width="24" height="4" rx="2" fill="#fff"/>
+    </svg>
+    <span>Conectando con el monitor SAP…
+      <small>Si tarda más de unos segundos, revisa que el servicio esté encendido.</small>
+    </span>
+  </div>
+
+  <div id="contenedorIframe">
+    <iframe id="miIframe" title="Monitor SAP Dunkin" allowfullscreen allow="fullscreen; clipboard-write"></iframe>
+  </div>
+
+  <button id="btnPantallaCompleta" type="button" aria-label="Pantalla completa" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>
+    </svg>
+  </button>
+
+  <noscript>
+    <p style="color:#fff;font:16px system-ui;text-align:center;padding:40px">Activa JavaScript para ver el monitor.</p>
+  </noscript>
+
+  <script>
+    /* ===== URL del monitor =====
+       Usa la URL del túnel (https), NO la IP directa:
+       - con la IP, cualquiera la ve en el código fuente;
+       - si esta página se publica con https, el navegador bloquea un iframe http. */
+    const URL_MONITOR = 'http://34.176.9.216:8090';
+
+    const iframe = document.getElementById('miIframe');
+    iframe.src = URL_MONITOR;
+
+    // Oculta la pantalla de carga cuando el monitor terminó de cargar (o a los 15 s, por si acaso)
+    const cargando = document.getElementById('cargando');
+    const quitarCarga = () => cargando.classList.add('listo');
+    iframe.addEventListener('load', quitarCarga);
+    setTimeout(quitarCarga, 15000);
+
+    // ===== Pantalla completa =====
+    const btn = document.getElementById('btnPantallaCompleta');
+    const raiz = document.documentElement;
+    const pedir = raiz.requestFullscreen || raiz.webkitRequestFullscreen;
+    const salir = document.exitFullscreen || document.webkitExitFullscreen;
+    const enPantallaCompleta = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+    // Abierta desde el acceso directo (ya está en modo app)
+    const comoApp = window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches
+                 || window.navigator.standalone === true;
+
+    // El botón aparece solo donde sirve: el navegador permite pantalla completa
+    // (el iPhone no lo permite para páginas) y no se abrió como app.
+    function actualizarBoton() {
+      btn.hidden = !pedir || comoApp || enPantallaCompleta();
+    }
+
+    function alternarPantallaCompleta() {
+      if (enPantallaCompleta()) { if (salir) salir.call(document); return; }
+      if (!pedir) return;
+      const r = pedir.call(raiz, { navigationUI: 'hide' });
+      if (r && r.catch) r.catch(err => console.error('No se pudo activar pantalla completa: ' + err.message));
+    }
+
+    btn.addEventListener('click', alternarPantallaCompleta);
+    document.addEventListener('fullscreenchange', actualizarBoton);
+    document.addEventListener('webkitfullscreenchange', actualizarBoton);
+    actualizarBoton();
+  </script>
+
+</body>
+</html>
